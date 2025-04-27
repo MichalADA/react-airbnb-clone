@@ -173,7 +173,7 @@ The pipeline includes automatic security scanning:
 
 ## 👨‍💻 Author
 
-Michal-DevOps
+MichalADA
 
 ---
 
