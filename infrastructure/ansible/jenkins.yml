@@ -1,0 +1,147 @@
+---
+- name: Install and Configure Jenkins Server
+  hosts: jenkins
+  become: yes
+  vars:
+    jenkins_repo_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+    jenkins_repo: deb https://pkg.jenkins.io/debian-stable binary/
+    java_version: "17"
+    node_version: "16"
+    docker_users:
+      - jenkins
+      - ubuntu
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisites
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+        state: present
+
+    # Install Java
+    - name: Add Eclipse Adoptium repository
+      apt_repository:
+        repo: ppa:adoptium/temurin-11
+        state: present
+
+    - name: Install Java
+      apt:
+        name: temurin-{{ java_version }}-jdk
+        state: present
+        update_cache: yes
+
+    # Install Jenkins
+    - name: Add Jenkins apt key
+      apt_key:
+        url: "{{ jenkins_repo_key_url }}"
+        state: present
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: "{{ jenkins_repo }}"
+        state: present
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+        update_cache: yes
+
+    - name: Start Jenkins service
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    # Install Docker
+    - name: Add Docker GPG apt key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        update_cache: yes
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    # Add users to Docker group
+    - name: Add users to Docker group
+      user:
+        name: "{{ item }}"
+        groups: docker
+        append: yes
+      with_items: "{{ docker_users }}"
+
+    # Install SonarQube Scanner
+    - name: Install SonarQube Scanner dependencies
+      apt:
+        name:
+          - zip
+          - unzip
+        state: present
+
+    # Install Node.js
+    - name: Install Node.js
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_{{ node_version }}.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+      args:
+        warn: false
+
+    # Install Trivy
+    - name: Add Trivy GPG key
+      apt_key:
+        url: https://aquasecurity.github.io/trivy-repo/deb/public.key
+        state: present
+
+    - name: Add Trivy repository
+      apt_repository:
+        repo: deb [arch=amd64] https://aquasecurity.github.io/trivy-repo/deb {{ ansible_distribution_release }} main
+        state: present
+
+    - name: Install Trivy
+      apt:
+        name: trivy
+        state: present
+        update_cache: yes
+
+    # Restart Jenkins to apply changes
+    - name: Restart Jenkins service
+      service:
+        name: jenkins
+        state: restarted
+
+    # Get Jenkins initial admin password
+    - name: Get Jenkins admin password
+      shell: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_admin_password
+      changed_when: false
+
+    - name: Display Jenkins admin password
+      debug:
+        msg: "Jenkins initial admin password: {{ jenkins_admin_password.stdout }}"

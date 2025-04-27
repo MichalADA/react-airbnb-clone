@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # React Application
+  react-app:
+    image: michaldevops/react-airbnb-clone:latest
+    container_name: react-airbnb-clone
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    networks:
+      - app-network
+    depends_on:
+      - database
+    labels:
+      - "prometheus.enable=true"
+      - "prometheus.port=80"
+      - "prometheus.path=/metrics"
+
+  # Database
+  database:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: securepassword
+      MYSQL_DATABASE: reactapp
+      MYSQL_USER: reactuser
+      MYSQL_PASSWORD: reactpassword
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - app-network
+    command: --default-authentication-plugin=mysql_native_password
+    labels:
+      - "prometheus.enable=true"
+      - "prometheus.port=9104"
+
+  # MySQL Exporter for Prometheus
+  mysql-exporter:
+    image: prom/mysqld-exporter:latest
+    container_name: mysql-exporter
+    restart: unless-stopped
+    ports:
+      - "9104:9104"
+    environment:
+      DATA_SOURCE_NAME: "reactuser:reactpassword@(database:3306)/reactapp"
+    networks:
+      - app-network
+    depends_on:
+      - database
+
+  # Node Exporter for App Server
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mysql-data:

@@ -1,0 +1,168 @@
+---
+- name: Install and Configure Database
+  hosts: database
+  become: yes
+  vars:
+    mysql_root_password: "securepassword" # Change this in production!
+    mysql_db_name: "reactapp"
+    mysql_user: "reactuser"
+    mysql_password: "reactpassword" # Change this in production!
+    node_exporter_version: 1.6.1
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisites
+      apt:
+        name:
+          - wget
+          - gnupg
+          - software-properties-common
+        state: present
+
+    # Install MySQL
+    - name: Set MySQL root password before installation
+      debconf:
+        name: mysql-server
+        question: mysql-server/root_password
+        value: "{{ mysql_root_password }}"
+        vtype: password
+
+    - name: Confirm MySQL root password before installation
+      debconf:
+        name: mysql-server
+        question: mysql-server/root_password_again
+        value: "{{ mysql_root_password }}"
+        vtype: password
+
+    - name: Install MySQL server
+      apt:
+        name:
+          - mysql-server
+          - mysql-client
+          - python3-mysqldb  # For Ansible MySQL modules
+        state: present
+
+    - name: Start MySQL service
+      service:
+        name: mysql
+        state: started
+        enabled: yes
+
+    # Configure MySQL
+    - name: Create MySQL database
+      mysql_db:
+        name: "{{ mysql_db_name }}"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+
+    - name: Create MySQL user
+      mysql_user:
+        name: "{{ mysql_user }}"
+        password: "{{ mysql_password }}"
+        priv: "{{ mysql_db_name }}.*:ALL"
+        host: '%'
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+
+    # Configure MySQL to allow remote connections
+    - name: Configure MySQL to bind to all interfaces
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address'
+        line: 'bind-address = 0.0.0.0'
+      register: mysql_config
+
+    # Restart MySQL if configuration changed
+    - name: Restart MySQL service
+      service:
+        name: mysql
+        state: restarted
+      when: mysql_config.changed
+
+    # Install Node Exporter for Prometheus monitoring
+    - name: Create Prometheus system group
+      group:
+        name: prometheus
+        state: present
+        system: yes
+
+    - name: Create Prometheus system user
+      user:
+        name: prometheus
+        group: prometheus
+        shell: /sbin/nologin
+        system: yes
+        createhome: no
+
+    - name: Download Node Exporter
+      get_url:
+        url: https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz
+        dest: /tmp/node_exporter.tar.gz
+        mode: 0644
+
+    - name: Extract Node Exporter
+      unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /tmp
+        remote_src: yes
+        creates: /tmp/node_exporter-{{ node_exporter_version }}.linux-amd64
+
+    - name: Copy Node Exporter binary
+      copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        owner: prometheus
+        group: prometheus
+        mode: 0755
+        remote_src: yes
+
+    # Create Node Exporter service
+    - name: Create Node Exporter systemd service
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Node Exporter
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=prometheus
+          Group=prometheus
+          Type=simple
+          ExecStart=/usr/local/bin/node_exporter
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Start and enable Node Exporter
+      service:
+        name: node_exporter
+        state: started
+        enabled: yes
+
+    # Output database connection information
+    - name: Show MySQL connection information
+      debug:
+        msg: 
+          - "Database setup complete"
+          - "Database Name: {{ mysql_db_name }}"
+          - "Username: {{ mysql_user }}"
+          - "Password: {{ mysql_password }}"
+          - "Host: {{ ansible_host }}"
+          - "Port: 3306"
