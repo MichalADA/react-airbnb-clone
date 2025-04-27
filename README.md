@@ -21,7 +21,7 @@ The project consists of the following components:
 
 The project requires the following AWS infrastructure:
 
-![DevOps Pipeline Architecture](docs/Pipeline-architecture.mmd)
+![AWS Infrastructure for React Airbnb Clone](docs/aws-architecture.svg)
 
 - **Ansible Control Node**: Manages the configuration of all other servers
 - **Jenkins Server**: Handles CI/CD processes (building, testing, deploying)
